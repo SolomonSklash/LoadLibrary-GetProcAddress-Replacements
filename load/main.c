@@ -77,6 +77,7 @@ FARPROC WINAPI GetExportAddress(HMODULE hMod, const char *lpProcName)
 
 	DWORD i;
 
+	/*  Check if the function name is an ordinal  */
 	if (((DWORD_PTR)lpProcName >> 16) == 0)
 	{
 		WORD ordinal = LOWORD(lpProcName);
@@ -87,6 +88,7 @@ FARPROC WINAPI GetExportAddress(HMODULE hMod, const char *lpProcName)
 
 		pAddress = (FARPROC)(pBaseAddress + (DWORD_PTR)ppFunctions[ordinal - dwOrdinalBase]);
 	}
+	/*  Function is exported by name, iterate through each function name and compare to the requested function  */
 	else
 	{
 		for (i = 0; i < pExportDirectory->NumberOfNames; i++)
@@ -99,12 +101,15 @@ FARPROC WINAPI GetExportAddress(HMODULE hMod, const char *lpProcName)
 			}
 		}
 	}
-
+	/*  If the acquired address is within the range of addresses that make up the export directory, then it is a pointer to
+	 *  a string containing the DLL name that actually exports the function. GetExportAddress() is recursively called using
+	 *  the pointer to the DLL name string  */
 	if ((char *)pAddress >= (char *)pExportDirectory && (char *)pAddress < (char *)pExportDirectory + pDataDirectory->Size)
 	{
 		char *szDllName, *szFunctionName;
 		HMODULE hForward;
-
+		
+		/*  Copy the DLL name  */
 		szDllName = _strdup((const char *)pAddress);
 		if (!szDllName)
 			return NULL;
@@ -113,17 +118,20 @@ FARPROC WINAPI GetExportAddress(HMODULE hMod, const char *lpProcName)
 		szFunctionName = strchr(szDllName, '.');
 		*szFunctionName++ = 0;
 
+		/* Get a function pointer to LoadLibraryA in order to load the export DLL  */
 		pLoadLibraryA = (LoadLibraryAF)GetExportAddress(GetModuleBaseAddress(L"KERNEL32.DLL"), "LoadLibraryA");
 
 		if (pLoadLibraryA == NULL)
 			return NULL;
-
+		
+		/* Get the address of the export DLL  */
 		hForward = pLoadLibraryA(szDllName);
 		free(szDllName);
 
 		if (!hForward)
 			return NULL;
-
+		
+		/*  Resolve the address of the exported function  */
 		pAddress = GetExportAddress(hForward, szFunctionName);
 	}
 
